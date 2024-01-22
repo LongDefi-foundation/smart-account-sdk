@@ -1,3 +1,1 @@
-export function sum(a: number, b: number) {
-  return a + b;
-}
+export { SmartAccountV1Provider } from "./smartAccountV1Provider";
