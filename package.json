@@ -1,6 +1,49 @@
 {
-  "name": "smart-account-sdk",
-  "module": "index.ts",
+  "name": "@long-defi/smart-account-sdk",
+  "version": "0.0.4",
+  "description": "LongDeFi Smart Account SDK",
+  "author": "LongDefi Foundation",
+  "keywords": [
+    "long-defi",
+    "smart-account",
+    "smart-account-sdk"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LongDefi-foundation/smart-account-sdk.git"
+  },
+  "main": "dist/_cjs/index.js",
+  "module": "dist/_esm/index.js",
+  "types": "dist/_types/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    "./src": {
+      "types": "./dist/_types/index.d.ts",
+      "import": "./dist/_esm/index.mjs",
+      "default": "./dist/_cjs/index.js"
+    },
+    "./src/utils": {
+      "types": "./dist/_types/utils/index.d.ts",
+      "import": "./dist/_esm/utils/index.mjs",
+      "default": "./dist/_cjs/utils/index.js"
+    },
+    "./src/abi": {
+      "types": "./dist/_types/abi/index.d.ts",
+      "import": "./dist/_esm/abi/index.mjs",
+      "default": "./dist/_cjs/abi/index.js"
+    },
+    "./addresses": {
+      "types": "./dist/_types/addresses/index.d.ts",
+      "import": "./dist/_esm/addresses/index.mjs",
+      "default": "./dist/_cjs/addresses/index.js"
+    }
+  },
   "scripts": {
     "test": "jest",
     "build": "bun run clean && bun run build:cjs && bun run build:esm && bun run build:types",
