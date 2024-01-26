@@ -1,18 +1,18 @@
-type DexName = "uniswapV3" | "pancakeSwapV3";
+export type DexName = "uniswapV3" | "pancakeSwapV3";
 
-type DexAddressesV3 = {
+export type DexAddressesV3 = {
   swapRouter: `0x${string}`;
   factory: `0x${string}`;
   nonfungiblePositionManager?: `0x${string}`;
 };
 
-type Dex = { [dex in DexName]?: DexAddressesV3 };
+export type Dex = { [dex in DexName]?: DexAddressesV3 };
 
-type DexChains = {
+export type DexChains = {
   [chainId: number]: Dex;
 };
 
-type SinglePathSwapInput = {
+export type SinglePathSwapInput = {
   tokenIn: `0x${string}`;
   tokenOut: `0x${string}`;
   fee: number;

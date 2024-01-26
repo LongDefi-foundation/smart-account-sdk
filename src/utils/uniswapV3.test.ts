@@ -1,6 +1,6 @@
-import { convertPriceToSqrtX96, convertSqrtX96toPrice } from "./uniswapV3";
 import { createPublicClient, http } from "viem";
 import { mainnet } from "viem/chains";
+import { convertPriceToSqrtX96, convertSqrtX96toPrice } from "./uniswapV3";
 
 const publicClient = createPublicClient({
   chain: mainnet,

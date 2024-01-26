@@ -8,7 +8,6 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
-import { SmartAccountV1Provider } from ".";
 import {
   ENTRYPOINT_ABI,
   ERC20_ABI,
@@ -18,6 +17,9 @@ import {
   UNISWAP_V3_POOL_ABI,
 } from "./abi";
 import { ENTRYPOINT_ADDRESS } from "./addresses";
+import { SmartAccountV1Provider } from "./smartAccountV1Provider";
+import type { SinglePathSwapInput } from "./types/dex.js";
+import type { UserOperation } from "./types/smartAccountV1.js";
 
 // WETH address: 0xD86bc69b52508368622E4F9f8f70a603FFbFC89C
 // USDC address: 0xfE435387201D3327983d19293B60C1C014E61650
@@ -232,6 +234,7 @@ describe.only("createSwapRequest", () => {
 
       const { smartAccount, userOpHash, request } =
         await smartAccountProvider.createSwapRequest({
+          orderId: 0,
           dex: "uniswapV3",
           swapInput: singlePathSwapInput,
           gasless: true,
@@ -372,6 +375,7 @@ describe.only("createSwapRequest", () => {
 
       const { userOpHash, request } =
         await smartAccountProvider.createSwapRequest({
+          orderId: 0,
           smartAccount,
           dex: "uniswapV3",
           swapInput: singlePathSwapInput,

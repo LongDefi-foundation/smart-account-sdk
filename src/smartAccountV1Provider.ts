@@ -21,14 +21,20 @@ import {
   ENTRYPOINT_ADDRESS,
   SMART_ACCOUNT_V1_CHAINS,
 } from "./addresses";
+import type { Dex } from "./types/dex";
+import type {
+  CreateSwapRequestInput,
+  CreateSwapRequestOutput,
+  UserOperation,
+} from "./types/smartAccountV1";
 
 export class SmartAccountV1Provider {
   readonly SESSION_MANAGER_DOMAIN_NAME = "LongDefi Session Key Manager";
   readonly ecdsa = new EC("secp256k1");
   publicClient: PublicClient<Transport, Chain>;
-  dex: Dex;
-  factory: `0x${string}`;
-  sessionKeyManager: `0x${string}`;
+  dex?: Dex;
+  factory?: `0x${string}`;
+  sessionKeyManager?: `0x${string}`;
 
   constructor(
     publicClient: PublicClient<Transport, Chain>,
@@ -36,43 +42,38 @@ export class SmartAccountV1Provider {
     sessionKeyManager?: `0x${string}`,
     dex?: Dex
   ) {
+    const dexChain = DEX_CHAINS[publicClient.chain.id];
+    const smartAccountChain = SMART_ACCOUNT_V1_CHAINS[publicClient.chain.id];
+
     this.publicClient = publicClient;
+    this.dex = dex || dexChain;
+    this.factory =
+      factory || (smartAccountChain && smartAccountChain.smartAccountFactoryV1);
+    this.sessionKeyManager =
+      sessionKeyManager ||
+      (smartAccountChain && smartAccountChain.sessionKeyManager);
+  }
 
-    if (dex) {
-      this.dex = dex;
-    } else {
-      const dexChain = DEX_CHAINS[publicClient.chain.id];
-      if (!dexChain) {
-        throw new Error("Dex not supported on this chain");
-      }
-      this.dex = dexChain;
-    }
+  setDex(dex: Dex) {
+    this.dex = dex;
+  }
 
-    const smartAccountV1Addresses =
-      SMART_ACCOUNT_V1_CHAINS[publicClient.chain.id];
-    if (factory) {
-      this.factory = factory;
-    } else {
-      if (!smartAccountV1Addresses) {
-        throw new Error("Smart account V1 not supported on this chain");
-      }
-      this.factory = smartAccountV1Addresses.smartAccountFactoryV1;
-    }
+  setFactory(factory: `0x${string}`) {
+    this.factory = factory;
+  }
 
-    if (sessionKeyManager) {
-      this.sessionKeyManager = sessionKeyManager;
-    } else {
-      if (!smartAccountV1Addresses) {
-        throw new Error("Smart account V1 not supported on this chain");
-      }
-      this.sessionKeyManager = smartAccountV1Addresses.sessionKeyManager;
-    }
+  setSessionKeyManager(sessionKeyManager: `0x${string}`) {
+    this.sessionKeyManager = sessionKeyManager;
   }
 
   async createSessionKeyRequest(
     owner: `0x${string}`,
     smartAccountSalt: bigint
   ) {
+    if (!this.sessionKeyManager) {
+      throw new Error("Session key manager not supported on this chain");
+    }
+
     const sessionKeyPair = this.ecdsa.genKeyPair();
     const publicKey = sessionKeyPair.getPublic("hex");
     const kc = keccak256(`0x${publicKey}`).slice(2);
@@ -149,7 +150,7 @@ export class SmartAccountV1Provider {
     };
   }
 
-  async revokeSessionKey(
+  async revokeSessionKeyRequest(
     owner: `0x${string}`,
     smartAccountSalt: bigint,
     pub:
@@ -161,6 +162,10 @@ export class SmartAccountV1Provider {
       | EC.KeyPair,
     enc?: string
   ): Promise<TypedDataDefinition> {
+    if (!this.sessionKeyManager) {
+      throw new Error("Session key manager not supported on this chain");
+    }
+
     const key = this.ecdsa.keyFromPublic(pub, enc);
     const publicKey = key.getPublic("hex");
     const kc = keccak256(`0x${publicKey}`).slice(2);
@@ -242,9 +247,11 @@ export class SmartAccountV1Provider {
         "Must provide either `smartAccount` or `initSmartAccountInput`"
       );
     }
-
     if (!this.dex) {
       throw new Error("Dex not supported");
+    }
+    if (!this.factory) {
+      throw new Error("Factory not supported");
     }
 
     const dexName = createSwapRequestInput.dex;
@@ -261,12 +268,7 @@ export class SmartAccountV1Provider {
     const initSmartAccountInput = createSwapRequestInput.initSmartAccountInput;
     if (initSmartAccountInput) {
       const { owner, salt } = initSmartAccountInput;
-      const address = await this.publicClient.readContract({
-        abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-        address: smartAccountFactory,
-        functionName: "getAddress",
-        args: [owner, salt],
-      });
+      const address = await this.getSmartAccountAddress(owner, salt);
       const bytecode = await this.publicClient.getBytecode({ address });
       if (bytecode && bytecode !== "0x") {
         throw new Error("Smart account already exists");
@@ -330,11 +332,14 @@ export class SmartAccountV1Provider {
 
     // nonce is uint256 with 192-bit key and 64-bit value
     // key is pool address
-    const nonce = await this.getNonceForSmartAccountV1(
+    const suffixId = createSwapRequestInput.orderId;
+    const nonce = await this.getNonceForSmartAccount(
       smartAccount,
       dex.factory,
-      [tokenIn, tokenOut],
-      fee
+      tokenIn,
+      tokenOut,
+      fee,
+      suffixId
     );
 
     // ==================================================
@@ -396,24 +401,46 @@ export class SmartAccountV1Provider {
     return { smartAccount, userOpHash, request: userOpWithoutSign };
   }
 
-  async getNonceForSmartAccountV1(
-    smartAccount: `0x${string}`,
-    dexFactory: `0x${string}`,
-    tokens: `0x${string}`[],
-    fee: number
-  ): Promise<bigint> {
-    if (tokens.length !== 2) {
-      throw new Error("Invalid token pair");
+  async getSmartAccountAddress(owner: `0x${string}`, salt: bigint) {
+    if (!this.factory) {
+      throw new Error("Factory not supported");
     }
 
+    const address = await this.publicClient.readContract({
+      abi: SMART_ACCOUNT_V1_FACTORY_ABI,
+      address: this.factory,
+      functionName: "getAddress",
+      args: [owner, salt],
+    });
+
+    return address;
+  }
+
+  async getNonceForSmartAccount(
+    smartAccount: `0x${string}`,
+    dexFactory: `0x${string}`,
+    tokenIn: `0x${string}`,
+    tokenOut: `0x${string}`,
+    fee: number,
+    suffixId: number
+  ): Promise<bigint> {
     const poolAddr = await this.publicClient.readContract({
       abi: UNISWAP_V3_FACTORY_ABI,
       address: dexFactory,
       functionName: "getPool",
-      args: [tokens[0], tokens[1], fee],
+      args: [tokenIn, tokenOut, fee],
     });
-    const formattedPoolAddr = poolAddr.toLowerCase();
-    const key = BigInt(formattedPoolAddr);
+
+    // key of nonce is 192-bit
+    const formattedPoolAddr = poolAddr.toLowerCase(); // 20-byte = 160-bit
+    const keyPrefix = BigInt(formattedPoolAddr) << BigInt(32);
+
+    if (!(suffixId < 2 ** 31)) {
+      throw new Error("Suffix id must be less than 2^31");
+    }
+    const zeroForOne = tokenIn.toLowerCase() < tokenOut.toLowerCase() ? 1n : 0n;
+    const keySuffix = (zeroForOne << 31n) | BigInt(suffixId);
+    const key = keyPrefix | keySuffix;
 
     const nonce = await this.publicClient.readContract({
       abi: ENTRYPOINT_ABI,

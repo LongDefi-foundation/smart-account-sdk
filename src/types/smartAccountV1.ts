@@ -1,14 +1,16 @@
-type SmartAccountV1Addresses = {
+import type { DexName, SinglePathSwapInput } from "./dex";
+
+export type SmartAccountV1Addresses = {
   entrypoint: `0x${string}`;
   sessionKeyManager: `0x${string}`;
   smartAccountFactoryV1: `0x${string}`;
 };
 
-type SmartAccountV1Chains = {
+export type SmartAccountV1Chains = {
   [chainId: number]: SmartAccountV1Addresses;
 };
 
-type UserOperation = {
+export type UserOperation = {
   sender: `0x${string}`;
   nonce: bigint;
   initCode: `0x${string}`;
@@ -22,12 +24,13 @@ type UserOperation = {
   signature: `0x${string}`;
 };
 
-type InitSmartAccountV1Input = {
+export type InitSmartAccountV1Input = {
   owner: `0x${string}`;
   salt: bigint;
 };
 
-type CreateSwapRequestInput = {
+export type CreateSwapRequestInput = {
+  orderId: number;
   smartAccount?: `0x${string}`;
   dex: DexName;
   swapInput: SinglePathSwapInput;
@@ -35,7 +38,7 @@ type CreateSwapRequestInput = {
   initSmartAccountInput?: InitSmartAccountV1Input;
 };
 
-type CreateSwapRequestOutput = {
+export type CreateSwapRequestOutput = {
   smartAccount: `0x${string}`;
   userOpHash: `0x${string}`;
   request: UserOperation;

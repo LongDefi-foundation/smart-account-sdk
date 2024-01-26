@@ -1,3 +1,6 @@
+import type { DexChains } from "../types/dex";
+import type { SmartAccountV1Chains } from "../types/smartAccountV1";
+
 export const ENTRYPOINT_ADDRESS =
   "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" as const;
 
