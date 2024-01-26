@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-npm install @long-defi/smart-account-sdk viem
+npm install @long-defi/sdk viem
 ```
 
 ## Usage
@@ -25,27 +25,37 @@ const { sessionKey, request } =
     smartAccountSalt
   );
 
-// Using `wagmi` to sign request (ref: https://wagmi.sh/core/api/actions/signTypedData)
-const signature = await signMessage(config, request);
+// Signing with `useSignTypedData()` hook (https://wagmi.sh/react/api/hooks/useSignTypedData)
+const signature = await signTypedDataAsync(request);
 ```
 
-### Swap request with **new** wallet
+### Create swap request with uninitialized wallet
 
 ```typescript
-const smartAccountSalt = BigInt(0);
+// Get smart account salt from server
+const smartAccountSalt = await getSmartAccountSaltFromServer(...args);
+
+const smartAccount = await smartAccountProvider.getSmartAccountAddress(
+  owner,
+  smartAccountSalt
+);
 const initSmartAccountInput = {
-  owner: ownerSmartAccount.account.address,
+  owner,
   salt: smartAccountSalt,
 };
 const singlePathSwapInput = {
-  tokenIn: token1Address,
-  tokenOut: token0Address,
+  tokenIn,
+  tokenOut,
   fee: 3000,
   deadline: BigInt(2 ** 255),
-  amountIn: BigInt(10 ** 6),
+  amountIn: BigInt(100),
   amountOutMinimum: BigInt(0),
-  sqrtPriceLimitX96: BigInt(0),
+  sqrtPriceLimitX96: BigInt(0), // optional, default is 0
+  recipient: smartAccount, // optional, default is smart account
 } as const;
+
+// Get orderId from server, must be unique
+const orderId = await getOrderIdFromServer(...args);
 
 const { smartAccount, userOpHash, request } =
   await smartAccountV1Provider.createSwapRequest({
@@ -53,22 +63,31 @@ const { smartAccount, userOpHash, request } =
     swapInput: singlePathSwapInput,
     gasless: true,
     initSmartAccountInput,
+    orderId,
   });
 
-// Using `wagmi` to sign request
+// There are 2 ways to sign request
+// 1. Using `useSignMessage` hook of `wagmi`
 const signature = await signMessage(config, {
   message: { raw: userOpHash },
 });
+// 2. Using sessionKey
+const signature = signMessageWithSessionKey(userOpHash);
 
 const userOperation = { ...request, signature };
+// Send `userOperation` to server
 ```
 
-### Swap request with **existed** wallet
+### Swap request with existed wallet
 
 ```typescript
+const smartAccount = await smartAccountV1Provider.getSmartAccountAddress(
+  owner,
+  smartAccountSalt
+);
 const singlePathSwapInput = {
-  tokenIn: token1Address,
-  tokenOut: token0Address,
+  tokenIn,
+  tokenOut,
   fee: 3000,
   deadline: BigInt(2 ** 255),
   amountIn: BigInt(20),
@@ -77,18 +96,22 @@ const singlePathSwapInput = {
 };
 const gasless = true;
 const { userOpHash, request } = await smartAccountV1Provider.createSwapRequest({
-  smartAccount: smartAccountV1.address,
+  smartAccount,
   dex: "uniswapV3",
   swapInput: singlePathSwapInput,
   gasless,
 });
 
-// Using `wagmi` to sign request
+// There are 2 ways to sign request
+// 1. Using `useSignMessage` hook of `wagmi`
 const signature = await signMessage(config, {
   message: { raw: userOpHash },
 });
+// 2. Using sessionKey
+const signature = signMessageWithSessionKey(userOpHash);
 
 const userOperation = { ...request, signature };
+// Send `userOperation` to server
 ```
 
 ### Price Utils
