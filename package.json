@@ -1,6 +1,6 @@
 {
-  "name": "@long-defi/smart-account-sdk",
-  "version": "0.0.4",
+  "name": "@long-defi/sdk",
+  "version": "0.0.1",
   "description": "LongDeFi Smart Account SDK",
   "author": "LongDefi Foundation",
   "keywords": [
@@ -15,46 +15,54 @@
     "type": "git",
     "url": "https://github.com/LongDefi-foundation/smart-account-sdk.git"
   },
-  "main": "dist/_cjs/index.js",
-  "module": "dist/_esm/index.js",
-  "types": "dist/_types/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/_types/index.d.ts",
+  "typings": "./dist/_types/index.d.ts",
   "files": [
+    "src",
     "dist",
-    "src"
+    "!**/*.tsbuildinfo",
+    "!**/*.test.ts",
+    "!tsconfig.build.json"
   ],
   "exports": {
-    "./src": {
-      "types": "./dist/_types/index.d.ts",
-      "import": "./dist/_esm/index.mjs",
-      "default": "./dist/_cjs/index.js"
-    },
-    "./src/utils": {
-      "types": "./dist/_types/utils/index.d.ts",
-      "import": "./dist/_esm/utils/index.mjs",
-      "default": "./dist/_cjs/utils/index.js"
-    },
-    "./src/abi": {
-      "types": "./dist/_types/abi/index.d.ts",
-      "import": "./dist/_esm/abi/index.mjs",
-      "default": "./dist/_cjs/abi/index.js"
-    },
-    "./addresses": {
-      "types": "./dist/_types/addresses/index.d.ts",
-      "import": "./dist/_esm/addresses/index.mjs",
-      "default": "./dist/_cjs/addresses/index.js"
+    ".": "./dist/index.js",
+    "./utils": "./dist/utils/index.js",
+    "./abi": "./dist/abi/index.js",
+    "./addresses": "./dist/addresses/index.js"
+  },
+  "typesVersions": {
+    "*": {
+      "index.d.ts": [
+        "./dist/_types/index.d.ts"
+      ],
+      "utils": [
+        "./dist/_types/utils/index.d.ts"
+      ],
+      "abi": [
+        "./dist/_types/abi/index.d.ts"
+      ],
+      "addresses": [
+        "./dist/_types/addresses/index.d.ts"
+      ]
     }
   },
   "scripts": {
     "test": "jest",
-    "build": "bun run clean && bun run build:cjs && bun run build:esm && bun run build:types",
-    "build:cjs": "tsc --project ./tsconfig.build.json --module commonjs --outDir ./dist/_cjs --removeComments --verbatimModuleSyntax false && printf '{\"type\":\"commonjs\"}' > ./dist/_cjs/package.json",
-    "build:esm": "tsc --project ./tsconfig.build.json --module es2015 --outDir ./dist/_esm && printf '{\"type\": \"module\",\"sideEffects\":false}' > ./dist/_esm/package.json",
-    "build:types": "tsc --project ./tsconfig.build.json --module esnext --declarationDir ./dist/_types --emitDeclarationOnly --declaration --declarationMap",
-    "clean": "rm -rf dist"
+    "build": "bun run clean && tsc --build ./tsconfig.build.json && bun run build:types",
+    "build:types": "tsc --project ./tsconfig.build.json --module esnext --outDir ./dist/_types --emitDeclarationOnly --declaration --declarationMap",
+    "clean": "tsc --build ./tsconfig.build.json --clean && rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "typescript": "^5.0.0",
     "viem": "^2.4.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@types/elliptic": "^6.4.18",
