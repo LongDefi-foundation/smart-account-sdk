@@ -17,11 +17,6 @@ export const SMART_ACCOUNT_V1_CHAINS: SmartAccountV1Chains = {
     smartAccountFactoryV1: "0xe6A2C54B2e4695013f98415D71c2CF9CF0144C46",
     sessionKeyManager: "0x598DCEF8eBA700aB35deF0EC5644cda5747668D5",
   },
-  137: {
-    entrypoint: ENTRYPOINT_ADDRESS,
-    smartAccountFactoryV1: "0x", // TODO: update
-    sessionKeyManager: "0x", // TODO: update
-  },
   80001: {
     entrypoint: ENTRYPOINT_ADDRESS,
     smartAccountFactoryV1: "0x3917d4c08477FA10d7c8CC91936D84957224B2a8",

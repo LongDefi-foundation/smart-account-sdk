@@ -118,7 +118,7 @@ beforeAll(async () => {
   }
 });
 
-describe.skip("createSessionKeyRequest", async () => {
+describe("createSessionKeyRequest", async () => {
   const smartAccountSalt = 0n;
 
   testIf(startedAnvil)("create properly", async () => {
@@ -214,7 +214,7 @@ describe.skip("createSessionKeyRequest", async () => {
   });
 });
 
-describe.skip("createSwapRequest", () => {
+describe("createSwapRequest", () => {
   const smartAccountSalt = BigInt(Date.now());
 
   testIf(startedAnvil)(
