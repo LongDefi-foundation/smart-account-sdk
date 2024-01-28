@@ -3,7 +3,8 @@ export type DexName = "uniswapV3" | "pancakeSwapV3";
 export type DexAddressesV3 = {
   swapRouter: `0x${string}`;
   factory: `0x${string}`;
-  nonfungiblePositionManager?: `0x${string}`;
+  nonfungiblePositionManager: `0x${string}`;
+  quoterV2: `0x${string}`;
 };
 
 export type Dex = { [dex in DexName]?: DexAddressesV3 };

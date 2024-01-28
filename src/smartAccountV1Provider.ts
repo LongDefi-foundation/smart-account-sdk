@@ -364,8 +364,8 @@ export class SmartAccountV1Provider {
     // 3. calculate preVerificationGas => Gas to compensate the bundler, Use internal bundler => Don't care
     const preVerificationGas = BigInt(0);
 
-    // 4. calculate maxFeePerGas => 30 gwei
-    // 5. calculate maxPriorityFeePerGas => estimate: 2 gwei
+    // 4. calculate maxFeePerGas => avg 30 gwei
+    // 5. calculate maxPriorityFeePerGas => avg 2 gwei
     // TODO: Both fees based on particular chain
 
     let maxFeePerGas = BigInt(0);
@@ -458,7 +458,7 @@ export class SmartAccountV1Provider {
     if (initSmartAccount) {
       return BigInt(300_000);
     } else {
-      return BigInt(50_000);
+      return BigInt(60_000);
     }
   }
 
