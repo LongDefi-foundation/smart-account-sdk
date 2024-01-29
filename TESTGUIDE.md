@@ -17,22 +17,16 @@ $ forge install
 $ bun install # yarn
 ```
 
-2. Create `.env`
+2. Create `.env` in `core-contracts` repo
 
 ```ts
-export API_KEY_ETHERSCAN="<ETHERSCAN_API_KEY>"
 export API_KEY_INFURA="<API_KEY>"
 export FOUNDRY_PROFILE="default"
 ```
 
-3. Run anvil fork
+3. Run anvil fork in `core-contracts` repo
 
 ```sh
-$ anvil --fork-url https://mainnet.infura.io/v3/$API_KEY_INFURA
-```
-
-4. Run setup script
-
-```sh
-$ forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --chain mainnet --broadcast
+$ source .env
+$ anvil --fork-url https://sepolia.infura.io/v3/$API_KEY_INFURA --fork-block-number 5176224
 ```
