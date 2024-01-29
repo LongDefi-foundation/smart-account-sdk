@@ -7,7 +7,9 @@ export type DexAddressesV3 = {
   quoterV2: `0x${string}`;
 };
 
-export type Dex = { [dex in DexName]?: DexAddressesV3 };
+export type Dex = { [dex in DexName]?: DexAddressesV3 } & {
+  weth: `0x${string}`;
+};
 
 export type DexChains = {
   [chainId: number]: Dex;
@@ -21,5 +23,4 @@ export type SinglePathSwapInput = {
   deadline: bigint;
   amountIn: bigint;
   amountOutMinimum: bigint;
-  sqrtPriceLimitX96?: bigint; // if not set, use 0, which means no limit
 };

@@ -27,6 +27,7 @@ export const SMART_ACCOUNT_V1_CHAINS: SmartAccountV1Chains = {
 export const DEX_CHAINS: DexChains = {
   1: {
     uniswapV3: UNISWAP_V3_ETH_ADDRESSES,
+    weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
   },
   11155111: {
     uniswapV3: {
@@ -35,11 +36,14 @@ export const DEX_CHAINS: DexChains = {
       nonfungiblePositionManager: "0x1238536071E1c677A632429e3655c799b22cDA52",
       quoterV2: "0xAb32382C0FE4F7FDC63E3A5d87e9545D64aa4c3e",
     },
+    weth: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
   },
   137: {
     uniswapV3: UNISWAP_V3_ETH_ADDRESSES,
+    weth: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
   },
   80001: {
     uniswapV3: UNISWAP_V3_ETH_ADDRESSES,
+    weth: "0x9c3C9283D3e44854697Cd22D3Faa240Cfb032889",
   },
 };

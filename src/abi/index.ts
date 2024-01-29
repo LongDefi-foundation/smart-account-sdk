@@ -1,4 +1,4 @@
-export { ERC20_ABI } from "./erc20";
+export { ERC20_ABI, WETH_ABI } from "./erc20";
 export {
   UNISWAP_V3_FACTORY_ABI,
   UNISWAP_V3_NON_FUNGIBLE_POSITION_MANAGER_ABI,

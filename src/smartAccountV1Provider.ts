@@ -1,7 +1,10 @@
 import { ec as EC } from "elliptic";
 import {
+  BaseError,
+  ContractFunctionRevertedError,
   encodeFunctionData,
   keccak256,
+  zeroAddress,
   type Chain,
   type PublicClient,
   type Transport,
@@ -27,13 +30,14 @@ import type {
   CreateSwapRequestOutput,
   UserOperation,
 } from "./types/smartAccountV1";
+import type { ReturnInfo } from "./types/entrypoint";
 
 export class SmartAccountV1Provider {
   readonly SESSION_MANAGER_DOMAIN_NAME = "LongDefi Session Key Manager";
   readonly ecdsa = new EC("secp256k1");
   publicClient: PublicClient<Transport, Chain>;
-  dex?: Dex;
-  factory?: `0x${string}`;
+  dex: Dex;
+  factory: `0x${string}`;
   sessionKeyManager?: `0x${string}`;
 
   constructor(
@@ -247,13 +251,8 @@ export class SmartAccountV1Provider {
         "Must provide either `smartAccount` or `initSmartAccountInput`"
       );
     }
-    if (!this.dex) {
-      throw new Error("Dex not supported");
-    }
-    if (!this.factory) {
-      throw new Error("Factory not supported");
-    }
 
+    const weth = this.dex.weth;
     const dexName = createSwapRequestInput.dex;
     const dex = this.dex[dexName];
     if (!dex) {
@@ -296,33 +295,84 @@ export class SmartAccountV1Provider {
       deadline,
       amountIn,
       amountOutMinimum,
-      sqrtPriceLimitX96,
     } = createSwapRequestInput.swapInput;
-    const approveCallData = encodeFunctionData({
-      abi: ERC20_ABI,
-      functionName: "approve",
-      args: [dex.swapRouter, amountIn],
-    });
+    if (tokenIn.toLowerCase() === tokenOut.toLowerCase()) {
+      throw new Error("TokenIn and TokenOut must be different");
+    }
 
-    const exactInputSingleCallData = encodeFunctionData({
-      abi: UNISWAP_V3_SWAP_ROUTER_ABI,
-      functionName: "exactInputSingle",
-      args: [
-        {
-          tokenIn,
-          tokenOut,
-          fee,
-          recipient: recipient || smartAccount,
-          deadline,
-          amountIn,
-          amountOutMinimum,
-          sqrtPriceLimitX96: sqrtPriceLimitX96 || BigInt(0),
-        },
-      ],
-    });
-    const dest = [tokenIn, dex.swapRouter];
+    let swapRouterCalldata: `0x${string}`;
+    if (tokenOut.toLowerCase() == weth.toLowerCase()) {
+      const exactInputSingleCallData = encodeFunctionData({
+        abi: UNISWAP_V3_SWAP_ROUTER_ABI,
+        functionName: "exactInputSingle",
+        args: [
+          {
+            tokenIn,
+            tokenOut,
+            fee,
+            recipient: zeroAddress,
+            deadline,
+            amountIn,
+            amountOutMinimum,
+            sqrtPriceLimitX96: BigInt(0),
+          },
+        ],
+      });
+      const unwrapWeth9CallData = encodeFunctionData({
+        abi: UNISWAP_V3_SWAP_ROUTER_ABI,
+        functionName: "unwrapWETH9",
+        args: [amountOutMinimum, recipient || smartAccount],
+      });
+
+      const multicallCallData = encodeFunctionData({
+        abi: UNISWAP_V3_SWAP_ROUTER_ABI,
+        functionName: "multicall",
+        args: [[exactInputSingleCallData, unwrapWeth9CallData]],
+      });
+
+      swapRouterCalldata = multicallCallData;
+    } else {
+      const exactInputSingleCallData = encodeFunctionData({
+        abi: UNISWAP_V3_SWAP_ROUTER_ABI,
+        functionName: "exactInputSingle",
+        args: [
+          {
+            tokenIn,
+            tokenOut,
+            fee,
+            recipient: recipient || smartAccount,
+            deadline,
+            amountIn,
+            amountOutMinimum,
+            sqrtPriceLimitX96: BigInt(0),
+          },
+        ],
+      });
+
+      swapRouterCalldata = exactInputSingleCallData;
+    }
+
+    // const dest = [tokenIn, dex.swapRouter];
+    // const value =
+    //   tokenIn.toLowerCase() === weth.toLowerCase() ? [0n, amountIn] : [];
+    // const func = [approveCallData, exactInputSingleCallData];
+    const dest: `0x${string}`[] = [];
     const value: bigint[] = [];
-    const func = [approveCallData, exactInputSingleCallData];
+    const func: `0x${string}`[] = [];
+    if (tokenIn.toLowerCase() === weth.toLowerCase()) {
+      dest.push(dex.swapRouter);
+      value.push(amountIn);
+      func.push(swapRouterCalldata);
+    } else {
+      const approveCallData = encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [dex.swapRouter, amountIn],
+      });
+
+      dest.push(tokenIn, dex.swapRouter);
+      func.push(approveCallData, swapRouterCalldata);
+    }
 
     const executeBatchCallData = encodeFunctionData({
       abi: SMART_ACCOUNT_V1_ABI,
@@ -342,6 +392,20 @@ export class SmartAccountV1Provider {
       suffixId
     );
 
+    const userOpWithoutSign: UserOperation = {
+      sender: smartAccount,
+      nonce,
+      initCode,
+      callData: executeBatchCallData,
+      callGasLimit: 0n,
+      verificationGasLimit: 0n,
+      preVerificationGas: 0n,
+      maxFeePerGas: 0n,
+      maxPriorityFeePerGas: 0n,
+      paymasterAndData: "0x" as `0x${string}`,
+      signature: "0x" as `0x${string}`,
+    };
+
     // ==================================================
     // ===== maximum of values before is "< uin120" =====
     // ==================================================
@@ -349,7 +413,7 @@ export class SmartAccountV1Provider {
     // So, (1 + 2 + 3) * 4 = total `wei` needs to execute this transaction
 
     // 1. calculate callGasLimit => Gas limit for execution phase, estimate by using EntryPoint simulation (function simulateValidation)
-    const callGasLimit = await this.calculateExecuteBatchGasLimit(
+    userOpWithoutSign.callGasLimit = await this.calculateExecuteBatchGasLimit(
       smartAccount,
       dest,
       value,
@@ -357,38 +421,20 @@ export class SmartAccountV1Provider {
     );
 
     // 2. calculate verificationGasLimit => Gas limit for verification phase, estimate by using EntryPoint simulation (function simulateValidation)
-    const verificationGasLimit = await this.calculateVerificationGasLimitV1(
-      initCode !== "0x"
-    );
+    userOpWithoutSign.verificationGasLimit =
+      await this.calculateVerificationGasLimitV1(userOpWithoutSign);
 
     // 3. calculate preVerificationGas => Gas to compensate the bundler, Use internal bundler => Don't care
-    const preVerificationGas = BigInt(0);
+    // userOpWithoutSign.preVerificationGas = BigInt(0);
 
     // 4. calculate maxFeePerGas => avg 30 gwei
     // 5. calculate maxPriorityFeePerGas => avg 2 gwei
     // TODO: Both fees based on particular chain
 
-    let maxFeePerGas = BigInt(0);
-    let maxPriorityFeePerGas = BigInt(0);
-
     if (!createSwapRequestInput.gasless) {
-      maxFeePerGas = BigInt(30e9);
-      maxPriorityFeePerGas = BigInt(2e9);
+      userOpWithoutSign.maxFeePerGas = BigInt(30e9);
+      userOpWithoutSign.maxPriorityFeePerGas = BigInt(2e9);
     }
-
-    const userOpWithoutSign: UserOperation = {
-      sender: smartAccount,
-      nonce,
-      initCode,
-      callData: executeBatchCallData,
-      callGasLimit,
-      verificationGasLimit,
-      preVerificationGas,
-      maxFeePerGas,
-      maxPriorityFeePerGas,
-      paymasterAndData: "0x" as `0x${string}`,
-      signature: "0x" as `0x${string}`,
-    };
 
     // userOpHash does not depend on signature
     const userOpHash = await this.publicClient.readContract({
@@ -453,12 +499,59 @@ export class SmartAccountV1Provider {
   }
 
   async calculateVerificationGasLimitV1(
-    initSmartAccount?: boolean
+    userOp: UserOperation
   ): Promise<bigint> {
-    if (initSmartAccount) {
-      return BigInt(300_000);
-    } else {
-      return BigInt(60_000);
+    // if (initSmartAccount) {
+    //   return BigInt(300_000);
+    // } else {
+    //   return BigInt(60_000);
+    // }
+    try {
+      const maxGas = 30_000_000n;
+      const mockSignature =
+        "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
+
+      // this function always reverts
+      await this.publicClient.simulateContract({
+        abi: ENTRYPOINT_ABI,
+        address: ENTRYPOINT_ADDRESS,
+        functionName: "simulateValidation",
+        args: [
+          {
+            ...userOp,
+            verificationGasLimit: maxGas,
+            signature: mockSignature,
+          },
+        ],
+      });
+
+      throw new Error("Can not estimate verification gas");
+    } catch (err) {
+      if (err instanceof BaseError) {
+        const revertError = err.walk(
+          (err) => err instanceof ContractFunctionRevertedError
+        );
+        if (revertError instanceof ContractFunctionRevertedError) {
+          if (
+            revertError.data &&
+            revertError.data.errorName === "ValidationResult"
+          ) {
+            // [ returnInfo, senderInfo, factoryInfo, paymasterInfo, aggregatorInfo ]
+            const validationResult = revertError.data;
+            // { preOpGas, prefund, sigFailed, validAfter, validUntil, paymasterContext }
+            const returnInfo = validationResult.args![0];
+            const { preOpGas } = returnInfo as ReturnInfo;
+            return preOpGas;
+          }
+
+          const revertReason = revertError.data
+            ? `${revertError.data.errorName}(${revertError.data.args})}`
+            : "";
+          throw new Error(`Can not estimate verification gas. ${revertReason}`);
+        }
+      }
+
+      throw new Error(`Can not estimate verification gas. ${err}`);
     }
   }
 
@@ -480,13 +573,15 @@ export class SmartAccountV1Provider {
       // ref: https://github.com/wolflo/evm-opcodes/blob/main/gas.md#aa-call-operations
       const baseGas = BigInt(21_000);
 
-      // TODO: smart account does not exist, so can not estimate gas
-      if (estimatedGas < 30_000) {
-        return BigInt(500_000);
+      // smart account does not exist, so can not estimate gas
+      if (estimatedGas <= 50_000) {
+        return BigInt(200_000);
       }
       return estimatedGas - baseGas;
     } catch (error) {
-      // Error when smart account does not have enough balance to simulate
+      // Error when smart account:
+      // +) not have enough balance to simulate
+      // +) not reach `amountOutMin`
       return BigInt(200_000);
     }
   }
