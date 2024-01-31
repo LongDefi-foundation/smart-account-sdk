@@ -1,8 +1,6 @@
-import { describe, expect, test, beforeAll } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
-  createPublicClient,
   createTestClient,
-  createWalletClient,
   decodeErrorResult,
   decodeEventLog,
   decodeFunctionData,
@@ -10,20 +8,22 @@ import {
   encodeFunctionData,
   http,
   parseEther,
+  publicActions,
   walletActions,
   zeroAddress,
   type HttpRequestErrorType,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
+import type { UserOperation } from ".";
 import {
+  AUTHORIZER_ABI,
   ENTRYPOINT_ABI,
   ERC20_ABI,
   SMART_ACCOUNT_V1_ABI,
   SMART_ACCOUNT_V1_FACTORY_ABI,
   UNISWAP_V3_POOL_ABI,
   UNISWAP_V3_QUOTER_V2_ABI,
-  UNISWAP_V3_SWAP_ROUTER_ABI,
   WETH_ABI,
 } from "./abi";
 import { ENTRYPOINT_ADDRESS, UNISWAP_V3_ETH_ADDRESSES } from "./addresses";
@@ -31,26 +31,25 @@ import { SmartAccountV1Provider } from "./smartAccountV1Provider";
 import type { SinglePathSwapInput } from "./types/dex.js";
 
 const rpcUrl = "http://localhost:8545"; // anvil local node
-const publicClient = createPublicClient({
+const testClient = createTestClient({
+  mode: "anvil",
   chain: sepolia,
   transport: http(rpcUrl),
-});
-const walletClient = createWalletClient({
-  chain: sepolia,
-  transport: http(rpcUrl),
-});
+})
+  .extend(publicActions)
+  .extend(walletActions);
 
 const bundler = privateKeyToAccount(
-  "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" // anvil account (1)
+  "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356" // anvil account (7)
 );
 const account = privateKeyToAccount(generatePrivateKey());
 
-const smartAccountProvider = new SmartAccountV1Provider(publicClient);
+const smartAccountProvider = new SmartAccountV1Provider(testClient);
 
 const WETH_ADDRESS = smartAccountProvider.dex.weth;
-const TOKEN_ADDRESS = process.env.TEST_TOKEN_ADDRESS as `0x${string}`;
-const POOL_ADDRESS = process.env.TEST_POOL_ADDRESS as `0x${string}`;
-const TEST_TOKEN_OWNER = process.env.TEST_TOKEN_OWNER as `0x${string}`;
+const TOKEN_ADDRESS = Bun.env.TEST_TOKEN_ADDRESS as `0x${string}`;
+const POOL_ADDRESS = Bun.env.TEST_POOL_ADDRESS as `0x${string}`;
+const TEST_TOKEN_OWNER = Bun.env.TEST_TOKEN_OWNER as `0x${string}`;
 
 if (!TOKEN_ADDRESS || !POOL_ADDRESS || !TEST_TOKEN_OWNER) {
   throw new Error("Missing environment variables");
@@ -58,7 +57,7 @@ if (!TOKEN_ADDRESS || !POOL_ADDRESS || !TEST_TOKEN_OWNER) {
 
 let startedAnvil = false;
 try {
-  await publicClient.getBlock();
+  await testClient.getBlock();
   startedAnvil = true;
 } catch (error) {
   if ((error as HttpRequestErrorType).shortMessage !== "HTTP request failed.") {
@@ -72,7 +71,7 @@ const sendTokenInToSmartAccount = async (
   amountIn: bigint
 ) => {
   if (tokenIn !== WETH_ADDRESS) {
-    await walletClient.writeContract({
+    await testClient.writeContract({
       account,
       abi: ERC20_ABI,
       address: tokenIn,
@@ -80,7 +79,7 @@ const sendTokenInToSmartAccount = async (
       args: [smartAccount, amountIn],
     });
   } else {
-    await walletClient.sendTransaction({
+    await testClient.sendTransaction({
       account,
       to: smartAccount,
       value: amountIn,
@@ -88,16 +87,29 @@ const sendTokenInToSmartAccount = async (
   }
 };
 
+const createNewSmartAccount = async (owner: `0x${string}`, salt?: bigint) => {
+  const smartAccountSalt = salt || BigInt(Date.now());
+  await testClient.writeContract({
+    account,
+    abi: SMART_ACCOUNT_V1_FACTORY_ABI,
+    address: smartAccountProvider.factory,
+    functionName: "createAccount",
+    args: [account.address, smartAccountSalt],
+  });
+
+  return await testClient.readContract({
+    abi: SMART_ACCOUNT_V1_FACTORY_ABI,
+    address: smartAccountProvider.factory,
+    functionName: "getAddress",
+    args: [owner, smartAccountSalt],
+  });
+};
+
 beforeAll(async () => {
   if (!startedAnvil) {
     return;
   }
 
-  const testClient = createTestClient({
-    mode: "anvil",
-    chain: sepolia,
-    transport: http(rpcUrl),
-  }).extend(walletActions);
   await testClient.setBalance({
     address: account.address,
     value: parseEther("10"),
@@ -140,7 +152,6 @@ describe.if(startedAnvil)("createSwapRequest", () => {
       } as const;
       const { smartAccount, userOpHash, request } =
         await smartAccountProvider.createSwapRequest({
-          orderId: 0,
           dex: "uniswapV3",
           swapInput: singlePathSwapInput,
           gasless: true,
@@ -158,14 +169,14 @@ describe.if(startedAnvil)("createSwapRequest", () => {
         message: { raw: userOpHash },
       });
       const userOp = { ...request, signature };
-      const tx = await walletClient.writeContract({
+      const tx = await testClient.writeContract({
         account: bundler,
         abi: ENTRYPOINT_ABI,
         address: ENTRYPOINT_ADDRESS,
         functionName: "handleOps",
         args: [[userOp], bundler.address],
       });
-      const txReceipt = await publicClient.waitForTransactionReceipt({
+      const txReceipt = await testClient.waitForTransactionReceipt({
         hash: tx,
       });
       const smartAccountEvents = [];
@@ -254,7 +265,7 @@ describe.if(startedAnvil)("createSwapRequest", () => {
         tokenEvents.find((event) => event.eventName === "Transfer")
       ).toBeDefined();
     },
-    20000
+    30000
   );
 
   test.each([
@@ -263,21 +274,7 @@ describe.if(startedAnvil)("createSwapRequest", () => {
   ])(
     "Only execute swap %s -> %s",
     async function (_tokenInName, _tokenOutName, tokenIn, tokenOut) {
-      const smartAccountSalt = BigInt(Date.now());
-      await walletClient.writeContract({
-        account,
-        abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-        address: smartAccountProvider.factory,
-        functionName: "createAccount",
-        args: [account.address, smartAccountSalt],
-      });
-
-      const smartAccount = await publicClient.readContract({
-        abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-        address: smartAccountProvider.factory,
-        functionName: "getAddress",
-        args: [account.address, smartAccountSalt],
-      });
+      const smartAccount = await createNewSmartAccount(account.address);
       const singlePathSwapInput: SinglePathSwapInput = {
         tokenIn,
         tokenOut,
@@ -296,7 +293,6 @@ describe.if(startedAnvil)("createSwapRequest", () => {
 
       const { userOpHash, request } =
         await smartAccountProvider.createSwapRequest({
-          orderId: 0,
           smartAccount,
           dex: "uniswapV3",
           swapInput: singlePathSwapInput,
@@ -307,14 +303,14 @@ describe.if(startedAnvil)("createSwapRequest", () => {
         message: { raw: userOpHash },
       });
       const userOp = { ...request, signature };
-      const tx = await walletClient.writeContract({
+      const tx = await testClient.writeContract({
         account: bundler,
         abi: ENTRYPOINT_ABI,
         address: ENTRYPOINT_ADDRESS,
         functionName: "handleOps",
         args: [[userOp], bundler.address],
       });
-      const txReceipt = await publicClient.waitForTransactionReceipt({
+      const txReceipt = await testClient.waitForTransactionReceipt({
         hash: tx,
       });
       const entrypointEvents = [];
@@ -372,200 +368,240 @@ describe.if(startedAnvil)("createSwapRequest", () => {
         tokenEvents.find((event) => event.eventName === "Transfer")
       ).toBeDefined();
     },
-    20000
+    30000
   );
+});
+
+describe.if(startedAnvil)("create swap request with session key", () => {
+  test("execute properly", async () => {
+    {
+      // impersonate owner of authorizer to add bundler to authorizer list
+      const owner = await testClient.readContract({
+        address: smartAccountProvider.authorizer,
+        abi: AUTHORIZER_ABI,
+        functionName: "owner",
+      });
+      await testClient.impersonateAccount({
+        address: owner,
+      });
+      await testClient.writeContract({
+        account: owner,
+        address: smartAccountProvider.authorizer,
+        abi: AUTHORIZER_ABI,
+        functionName: "addAuthorizer",
+        args: [bundler.address],
+      });
+    }
+
+    const smartAccount = await createNewSmartAccount(account.address);
+    const sessionNonce = BigInt(Date.now());
+    const { request: sessionRequest, session } =
+      await smartAccountProvider.createSessionKeyRequest(
+        smartAccount,
+        sessionNonce
+      );
+    const ownerSignature = await account.signTypedData(sessionRequest);
+
+    const singlePathSwapInput: SinglePathSwapInput = {
+      tokenIn: WETH_ADDRESS,
+      tokenOut: TOKEN_ADDRESS,
+      fee: 3000,
+      deadline: BigInt(2 ** 255),
+      amountIn: BigInt(10),
+      amountOutMinimum: BigInt(0),
+    } as const;
+
+    // send tokenIn to smart account
+    await sendTokenInToSmartAccount(
+      smartAccount,
+      singlePathSwapInput.tokenIn,
+      singlePathSwapInput.amountIn
+    );
+
+    const { userOpHash, request } =
+      await smartAccountProvider.createSwapRequest({
+        smartAccount,
+        dex: "uniswapV3",
+        swapInput: singlePathSwapInput,
+        gasless: true,
+      });
+
+    const sessionAccount = privateKeyToAccount(session.privateKey);
+    const sessionSignature = await sessionAccount.signMessage({
+      message: { raw: userOpHash },
+    });
+
+    const clientSignatures = smartAccountProvider.aggregateClientSignatures(
+      ownerSignature,
+      sessionSignature,
+      sessionNonce
+    );
+    const serverSignature = await bundler.signMessage({
+      message: { raw: userOpHash },
+    });
+    const signature = `0x${
+      serverSignature.slice(2) + clientSignatures.slice(2)
+    }` as const;
+    expect(signature.slice(2).length).toEqual(227 * 2);
+
+    const userOperation: UserOperation = {
+      ...request,
+      signature,
+    };
+    await testClient.estimateContractGas({
+      address: ENTRYPOINT_ADDRESS,
+      abi: ENTRYPOINT_ABI,
+      functionName: "handleOps",
+      args: [[userOperation], bundler.address],
+    });
+    expect(true);
+  }, 30000);
 });
 
 describe.if(startedAnvil)("call with JSON RPC", () => {
   test("Simulate handleOp", async () => {
-    try {
-      const smartAccountSalt = BigInt(Date.now());
-      const smartAccount = await publicClient.readContract({
-        abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-        address: smartAccountProvider.factory,
-        functionName: "getAddress",
-        args: [account.address, smartAccountSalt],
-      });
-      const initSmartAccountInput = {
-        owner: account.address,
-        salt: smartAccountSalt,
-      };
+    const smartAccount = await createNewSmartAccount(account.address);
 
-      const init = true;
-      if (!init) {
-        const tx = await walletClient.writeContract({
-          account,
-          abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-          address: smartAccountProvider.factory,
-          functionName: "createAccount",
-          args: [account.address, smartAccountSalt],
-        });
-        await publicClient.waitForTransactionReceipt({ hash: tx });
-      }
+    const singlePathSwapInput: SinglePathSwapInput = {
+      tokenIn: WETH_ADDRESS,
+      tokenOut: TOKEN_ADDRESS,
+      fee: 3000,
+      deadline: BigInt(2 ** 255),
+      amountIn: BigInt(10),
+      // amountOutMinimum: BigInt(1_000_000_000_000),
+      amountOutMinimum: BigInt(0),
+    } as const;
 
-      const singlePathSwapInput: SinglePathSwapInput = {
-        tokenIn: WETH_ADDRESS,
-        tokenOut: TOKEN_ADDRESS,
-        fee: 3000,
-        deadline: BigInt(2 ** 255),
-        amountIn: BigInt(10),
-        // amountOutMinimum: BigInt(1_000_000_000_000),
-        amountOutMinimum: BigInt(0),
-      } as const;
+    // send tokenIn to smart account
+    await sendTokenInToSmartAccount(
+      smartAccount,
+      singlePathSwapInput.tokenIn,
+      singlePathSwapInput.amountIn
+    );
 
-      // send tokenIn to smart account
-      await walletClient.writeContract({
-        account,
-        abi: ERC20_ABI,
-        address: singlePathSwapInput.tokenIn,
-        functionName: "transfer",
-        args: [smartAccount, singlePathSwapInput.amountIn * 2n],
+    const { userOpHash, request } =
+      await smartAccountProvider.createSwapRequest({
+        smartAccount,
+        dex: "uniswapV3",
+        swapInput: singlePathSwapInput,
+        gasless: true,
       });
+    const signature = await account.signMessage({
+      message: { raw: userOpHash },
+    });
+    const userOp = { ...request, signature };
 
-      const { userOpHash, request } =
-        await smartAccountProvider.createSwapRequest({
-          orderId: 0,
-          smartAccount,
-          initSmartAccountInput: init ? initSmartAccountInput : undefined,
-          dex: "uniswapV3",
-          swapInput: singlePathSwapInput,
-          gasless: true,
-        });
-      const signature = await account.signMessage({
-        message: { raw: userOpHash },
-      });
-      const userOp = { ...request, signature };
+    const executeBatchCalldata = decodeFunctionData({
+      abi: SMART_ACCOUNT_V1_ABI,
+      data: userOp.callData,
+    });
+    if (!executeBatchCalldata) {
+      throw new Error("invalid callData");
+    }
 
-      const executeBatchCalldata = decodeFunctionData({
-        abi: SMART_ACCOUNT_V1_ABI,
-        data: userOp.callData,
-      });
-      if (!executeBatchCalldata) {
-        throw new Error("invalid callData");
-      }
-      const swapCalldata = decodeFunctionData({
-        abi: UNISWAP_V3_SWAP_ROUTER_ABI,
-        data: (executeBatchCalldata.args[2] as any)[1],
-      });
-      const exactInputSingle = swapCalldata.args[0] as SinglePathSwapInput;
-      const smartAccountBalance = await publicClient.readContract({
-        abi: ERC20_ABI,
-        address: exactInputSingle.tokenIn,
-        functionName: "balanceOf",
-        args: [smartAccount],
-      });
-      if (smartAccountBalance < exactInputSingle.amountIn) {
-        console.log("Smart account balance is not enough");
-        return;
-      }
+    const data = encodeFunctionData({
+      abi: ENTRYPOINT_ABI,
+      functionName: "simulateHandleOp",
+      args: [userOp, zeroAddress, "0x"],
+    });
 
-      const data = encodeFunctionData({
-        abi: ENTRYPOINT_ABI,
-        functionName: "simulateHandleOp",
-        args: [userOp, zeroAddress, "0x"],
-      });
+    const handleOpResponse = await fetch(rpcUrl, {
+      method: "POST",
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_call",
+        params: [
+          {
+            from: bundler.address,
+            to: ENTRYPOINT_ADDRESS,
+            data,
+          },
+          "latest",
+        ],
+        id: 1,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    const handleOpResult = await handleOpResponse.json();
+    const decodedRes = decodeErrorResult({
+      abi: ENTRYPOINT_ABI,
+      data: handleOpResult.error.data,
+    });
+    if (decodedRes.errorName !== "ExecutionResult") {
+      throw new Error(`handleOps error: ${decodedRes.errorName}`);
+    }
 
-      const handleOpResponse = await fetch(rpcUrl, {
+    if (userOp.initCode !== "0x") {
+      // TODO: update when support init and execute
+      const quoteCalldata = encodeFunctionData({
+        abi: UNISWAP_V3_QUOTER_V2_ABI,
+        functionName: "quoteExactInputSingle",
+        args: [
+          {
+            tokenIn: singlePathSwapInput.tokenIn,
+            tokenOut: singlePathSwapInput.tokenOut,
+            amountIn: singlePathSwapInput.amountIn,
+            fee: singlePathSwapInput.fee,
+            sqrtPriceLimitX96: 0n,
+          },
+        ],
+      });
+      const quoteExactInputSingleResponse = await fetch(rpcUrl, {
+        headers: {
+          "Content-Type": "application/json",
+        },
         method: "POST",
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "eth_call",
           params: [
             {
-              from: bundler.address,
-              to: ENTRYPOINT_ADDRESS,
-              data,
+              from: zeroAddress,
+              to: UNISWAP_V3_ETH_ADDRESSES.quoterV2,
+              data: quoteCalldata,
             },
             "latest",
           ],
           id: 1,
         }),
+      });
+      const { result } = await quoteExactInputSingleResponse.json();
+
+      // [amountOut, sqrtPriceLimitX96After, initializedTicksCrossed, gasEstimate]
+      const quoteResult = decodeFunctionResult({
+        abi: UNISWAP_V3_QUOTER_V2_ABI,
+        functionName: "quoteExactInputSingle",
+        data: result,
+      });
+      if (quoteResult[0] < singlePathSwapInput.amountOutMinimum) {
+        throw new Error("amountOut is too small");
+      }
+    } else {
+      const executeBatchResponse = await fetch(rpcUrl, {
         headers: {
           "Content-Type": "application/json",
         },
-      });
-      const handleOpResult = await handleOpResponse.json();
-      const decodedRes = decodeErrorResult({
-        abi: ENTRYPOINT_ABI,
-        data: handleOpResult.error.data,
-      });
-      if (decodedRes.errorName !== "ExecutionResult") {
-        throw new Error(`handleOps error: ${decodedRes.errorName}`);
-      }
-
-      if (userOp.initCode !== "0x") {
-        const quoteCalldata = encodeFunctionData({
-          abi: UNISWAP_V3_QUOTER_V2_ABI,
-          functionName: "quoteExactInputSingle",
-          args: [
+        method: "POST",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_call",
+          params: [
             {
-              tokenIn: singlePathSwapInput.tokenIn,
-              tokenOut: singlePathSwapInput.tokenOut,
-              amountIn: singlePathSwapInput.amountIn,
-              fee: singlePathSwapInput.fee,
-              sqrtPriceLimitX96: 0n,
+              from: ENTRYPOINT_ADDRESS,
+              to: smartAccount,
+              data: userOp.callData,
             },
+            "latest",
           ],
-        });
-        const quoteExactInputSingleResponse = await fetch(rpcUrl, {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          method: "POST",
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            method: "eth_call",
-            params: [
-              {
-                from: zeroAddress,
-                to: UNISWAP_V3_ETH_ADDRESSES.quoterV2,
-                data: quoteCalldata,
-              },
-              "latest",
-            ],
-            id: 1,
-          }),
-        });
-        const { result } = await quoteExactInputSingleResponse.json();
-
-        // [amountOut, sqrtPriceLimitX96After, initializedTicksCrossed, gasEstimate]
-        const quoteResult = decodeFunctionResult({
-          abi: UNISWAP_V3_QUOTER_V2_ABI,
-          functionName: "quoteExactInputSingle",
-          data: result,
-        });
-        if (quoteResult[0] < singlePathSwapInput.amountOutMinimum) {
-          throw new Error("amountOut is too small");
-        }
-      } else {
-        const executeBatchResponse = await fetch(rpcUrl, {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          method: "POST",
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            method: "eth_call",
-            params: [
-              {
-                from: ENTRYPOINT_ADDRESS,
-                to: smartAccount,
-                data: userOp.callData,
-              },
-              "latest",
-            ],
-            id: 1,
-          }),
-        });
-        const result = await executeBatchResponse.json();
-        if (result.error) {
-          throw new Error("Execute batch failed:", result.message);
-        }
+          id: 1,
+        }),
+      });
+      const result = await executeBatchResponse.json();
+      if (result.error) {
+        throw new Error("Execute batch failed:", result.message);
       }
-
-      console.log("Simulation success");
-    } catch (e) {
-      console.log("Simulation failed:", e);
     }
-  }, 20000);
+  }, 30000);
 });

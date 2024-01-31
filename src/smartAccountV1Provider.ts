@@ -2,18 +2,19 @@ import { ec as EC } from "elliptic";
 import {
   BaseError,
   ContractFunctionRevertedError,
+  encodeAbiParameters,
   encodeFunctionData,
-  keccak256,
   zeroAddress,
   type Chain,
   type PublicClient,
   type Transport,
   type TypedDataDefinition,
 } from "viem";
+import { publicKeyToAddress } from "viem/utils";
 import {
+  AUTHORIZER_ABI,
   ENTRYPOINT_ABI,
   ERC20_ABI,
-  SESSION_KEY_MANAGER_ABI,
   SMART_ACCOUNT_V1_ABI,
   SMART_ACCOUNT_V1_FACTORY_ABI,
   UNISWAP_V3_FACTORY_ABI,
@@ -25,25 +26,25 @@ import {
   SMART_ACCOUNT_V1_CHAINS,
 } from "./addresses";
 import type { Dex } from "./types/dex";
+import type { ReturnInfo } from "./types/entrypoint";
 import type {
+  CreateSessionKeyRequestOutput,
   CreateSwapRequestInput,
   CreateSwapRequestOutput,
   UserOperation,
 } from "./types/smartAccountV1";
-import type { ReturnInfo } from "./types/entrypoint";
 
 export class SmartAccountV1Provider {
-  readonly SESSION_MANAGER_DOMAIN_NAME = "LongDefi Session Key Manager";
   readonly ecdsa = new EC("secp256k1");
   publicClient: PublicClient<Transport, Chain>;
-  dex: Dex;
+  authorizer: `0x${string}`;
   factory: `0x${string}`;
-  sessionKeyManager?: `0x${string}`;
+  dex: Dex;
 
   constructor(
     publicClient: PublicClient<Transport, Chain>,
+    authorizer?: `0x${string}`,
     factory?: `0x${string}`,
-    sessionKeyManager?: `0x${string}`,
     dex?: Dex
   ) {
     const dexChain = DEX_CHAINS[publicClient.chain.id];
@@ -51,193 +52,101 @@ export class SmartAccountV1Provider {
 
     this.publicClient = publicClient;
     this.dex = dex || dexChain;
+    this.authorizer =
+      authorizer || (smartAccountChain && smartAccountChain.authorizer);
     this.factory =
       factory || (smartAccountChain && smartAccountChain.smartAccountFactoryV1);
-    this.sessionKeyManager =
-      sessionKeyManager ||
-      (smartAccountChain && smartAccountChain.sessionKeyManager);
   }
 
   setDex(dex: Dex) {
     this.dex = dex;
   }
 
+  setAuthorizer(authorizer: `0x${string}`) {
+    this.authorizer = authorizer;
+  }
+
   setFactory(factory: `0x${string}`) {
     this.factory = factory;
   }
 
-  setSessionKeyManager(sessionKeyManager: `0x${string}`) {
-    this.sessionKeyManager = sessionKeyManager;
-  }
-
   async createSessionKeyRequest(
-    owner: `0x${string}`,
-    smartAccountSalt: bigint
-  ) {
-    if (!this.sessionKeyManager) {
-      throw new Error("Session key manager not supported on this chain");
-    }
-
+    smartAccount: `0x${string}`,
+    sessionNonce: bigint
+  ): Promise<CreateSessionKeyRequestOutput> {
     const sessionKeyPair = this.ecdsa.genKeyPair();
-    const publicKey = sessionKeyPair.getPublic("hex");
-    const kc = keccak256(`0x${publicKey}`).slice(2);
-    const sessionKeyAddress = `0x${kc.slice(-40)}` as const;
+    const sessionAddress = publicKeyToAddress(
+      `0x${sessionKeyPair.getPublic("hex")}`
+    );
 
-    // All properties on a domain are optional
-    const domain = {
-      name: this.SESSION_MANAGER_DOMAIN_NAME,
-      version: "1",
-      chainId: this.publicClient.chain.id,
-      verifyingContract: this.sessionKeyManager,
-    } as const;
+    // [fields, name, version, chainId, verifyingContract, salt, extensions]
+    const [_fields, name, version, chainId, verifyingContract] =
+      await this.publicClient.readContract({
+        abi: AUTHORIZER_ABI,
+        address: this.authorizer,
+        functionName: "eip712Domain",
+      });
 
     // The named list of all type definitions
     const types = {
       Permit: [
         {
-          name: "owner",
+          name: "smartAccount",
           type: "address",
         },
         {
-          name: "salt",
-          type: "uint256",
-        },
-        {
-          name: "sessionKey",
+          name: "sessionAddress",
           type: "address",
         },
         {
-          name: "nonce",
+          name: "sessionNonce",
           type: "uint256",
         },
       ],
     } as const;
 
-    // check if session key is already authorized
-    const isAuthorized = await this.publicClient.readContract({
-      abi: SESSION_KEY_MANAGER_ABI,
-      address: this.sessionKeyManager,
-      functionName: "isAuthorized",
-      args: [owner, sessionKeyAddress],
-    });
-
-    if (isAuthorized) {
-      throw new Error("Session key already authorized");
-    }
-
-    // get nonce from SessionManagerContract
-    const nonce = await this.publicClient.readContract({
-      abi: SESSION_KEY_MANAGER_ABI,
-      address: this.sessionKeyManager,
-      functionName: "nonces",
-      args: [owner],
-    });
-
     const request: TypedDataDefinition = {
-      domain,
+      domain: {
+        name,
+        version,
+        chainId: Number(chainId),
+        verifyingContract,
+      },
       types,
       primaryType: "Permit",
       message: {
-        owner,
-        salt: smartAccountSalt,
-        sessionKey: sessionKeyAddress,
-        nonce,
+        smartAccount,
+        sessionAddress,
+        sessionNonce,
       },
     } as const;
 
     return {
-      sessionKey: {
-        privateKey: sessionKeyPair.getPrivate("hex"),
-        address: sessionKeyAddress,
+      session: {
+        privateKey: `0x${sessionKeyPair.getPrivate("hex")}`,
+        address: sessionAddress,
       },
       request,
     };
   }
 
-  async revokeSessionKeyRequest(
-    owner: `0x${string}`,
-    smartAccountSalt: bigint,
-    pub:
-      | Uint8Array
-      | Buffer
-      | string
-      | number[]
-      | { x: string; y: string }
-      | EC.KeyPair,
-    enc?: string
-  ): Promise<TypedDataDefinition> {
-    if (!this.sessionKeyManager) {
-      throw new Error("Session key manager not supported on this chain");
-    }
-
-    const key = this.ecdsa.keyFromPublic(pub, enc);
-    const publicKey = key.getPublic("hex");
-    const kc = keccak256(`0x${publicKey}`).slice(2);
-    const sessionKey = `0x${kc.slice(-40)}` as const;
-
-    // All properties on a domain are optional
-    const domain = {
-      name: this.SESSION_MANAGER_DOMAIN_NAME,
-      version: "1",
-      chainId: this.publicClient.chain.id,
-      verifyingContract: this.sessionKeyManager,
-    } as const;
-
-    // The named list of all type definitions
-    const types = {
-      Revoke: [
+  aggregateClientSignatures(
+    ownerSignature: `0x${string}`,
+    sessionSignature: `0x${string}`,
+    sessionNonce: bigint
+  ): `0x${string}` {
+    const ownerSig = ownerSignature.slice(2);
+    const sessionSig = sessionSignature.slice(2);
+    const nonce = encodeAbiParameters(
+      [
         {
-          name: "owner",
-          type: "address",
-        },
-        {
-          name: "salt",
-          type: "uint256",
-        },
-        {
-          name: "sessionKey",
-          type: "address",
-        },
-        {
-          name: "nonce",
           type: "uint256",
         },
       ],
-    } as const;
+      [sessionNonce]
+    ).slice(2);
 
-    // check if session key is already authorized
-    const isAuthorized = await this.publicClient.readContract({
-      abi: SESSION_KEY_MANAGER_ABI,
-      address: this.sessionKeyManager,
-      functionName: "isAuthorized",
-      args: [owner, sessionKey],
-    });
-
-    if (isAuthorized) {
-      throw new Error("Session key already authorized");
-    }
-
-    // get nonce from SessionManagerContract
-    const nonce = await this.publicClient.readContract({
-      abi: SESSION_KEY_MANAGER_ABI,
-      address: this.sessionKeyManager,
-      functionName: "nonces",
-      args: [owner],
-    });
-
-    const request: TypedDataDefinition = {
-      domain,
-      types,
-      primaryType: "Revoke",
-      message: {
-        owner,
-        salt: smartAccountSalt,
-        sessionKey,
-        nonce,
-      },
-    };
-
-    return request;
+    return `0x${ownerSig + sessionSig + nonce}`;
   }
 
   async createSwapRequest(
@@ -352,10 +261,6 @@ export class SmartAccountV1Provider {
       swapRouterCalldata = exactInputSingleCallData;
     }
 
-    // const dest = [tokenIn, dex.swapRouter];
-    // const value =
-    //   tokenIn.toLowerCase() === weth.toLowerCase() ? [0n, amountIn] : [];
-    // const func = [approveCallData, exactInputSingleCallData];
     const dest: `0x${string}`[] = [];
     const value: bigint[] = [];
     const func: `0x${string}`[] = [];
@@ -382,7 +287,7 @@ export class SmartAccountV1Provider {
 
     // nonce is uint256 with 192-bit key and 64-bit value
     // key is pool address
-    const suffixId = createSwapRequestInput.orderId;
+    const suffixId = createSwapRequestInput.orderSeparatorId || 0;
     const nonce = await this.getNonceForSmartAccount(
       smartAccount,
       dex.factory,
@@ -510,6 +415,10 @@ export class SmartAccountV1Provider {
       const maxGas = 30_000_000n;
       const mockSignature =
         "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
+      const authorizerSignature = mockSignature.slice(2);
+      const ownerSignature = mockSignature.slice(2);
+      const sessionSignature = mockSignature.slice(2);
+      const nonce = "".padEnd(64, "0");
 
       // this function always reverts
       await this.publicClient.simulateContract({
@@ -520,7 +429,9 @@ export class SmartAccountV1Provider {
           {
             ...userOp,
             verificationGasLimit: maxGas,
-            signature: mockSignature,
+            signature: `0x${
+              authorizerSignature + ownerSignature + sessionSignature + nonce
+            }`,
           },
         ],
       });

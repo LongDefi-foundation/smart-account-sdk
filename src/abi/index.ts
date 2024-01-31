@@ -9,7 +9,7 @@ export {
 
 export { ENTRYPOINT_ABI } from "./entrypoint";
 export {
-  SESSION_KEY_MANAGER_ABI,
+  AUTHORIZER_ABI,
   SMART_ACCOUNT_V1_ABI,
   SMART_ACCOUNT_V1_FACTORY_ABI,
 } from "./smartAccountV1";

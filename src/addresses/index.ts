@@ -13,14 +13,9 @@ export const UNISWAP_V3_ETH_ADDRESSES = {
 
 export const SMART_ACCOUNT_V1_CHAINS: SmartAccountV1Chains = {
   11155111: {
+    authorizer: "0xfD1de5cab889487f7E4773dD77c1f218071CD145",
     entrypoint: ENTRYPOINT_ADDRESS,
-    smartAccountFactoryV1: "0xe6A2C54B2e4695013f98415D71c2CF9CF0144C46",
-    sessionKeyManager: "0x598DCEF8eBA700aB35deF0EC5644cda5747668D5",
-  },
-  80001: {
-    entrypoint: ENTRYPOINT_ADDRESS,
-    smartAccountFactoryV1: "0x3917d4c08477FA10d7c8CC91936D84957224B2a8",
-    sessionKeyManager: "0x0a46d7348ab5f2fA6cfA261Ccf6276853Fcc0746",
+    smartAccountFactoryV1: "0x2a7554024fe1F77C4cf62ae176E24C63bF5a14d5",
   },
 };
 

@@ -8,9 +8,9 @@ export const SMART_ACCOUNT_V1_ABI = [
         internalType: "contract IEntryPoint",
       },
       {
-        name: "aSessionKeyManager",
+        name: "authorizer",
         type: "address",
-        internalType: "contract SessionKeyManager",
+        internalType: "contract IAuthorizer",
       },
     ],
     stateMutability: "nonpayable",
@@ -132,15 +132,6 @@ export const SMART_ACCOUNT_V1_ABI = [
     name: "proxiableUUID",
     inputs: [],
     outputs: [{ name: "", type: "bytes32", internalType: "bytes32" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "sessionKeyManager",
-    inputs: [],
-    outputs: [
-      { name: "", type: "address", internalType: "contract SessionKeyManager" },
-    ],
     stateMutability: "view",
   },
   {
@@ -298,103 +289,71 @@ export const SMART_ACCOUNT_V1_ABI = [
 
 export const SMART_ACCOUNT_V1_FACTORY_ABI = [
   {
+    type: "constructor",
     inputs: [
       {
-        internalType: "contract IEntryPoint",
         name: "_entryPoint",
         type: "address",
+        internalType: "contract IEntryPoint",
       },
       {
-        internalType: "contract SessionKeyManager",
-        name: "_sessionKeyManager",
+        name: "_authorizer",
         type: "address",
+        internalType: "contract IAuthorizer",
       },
     ],
     stateMutability: "nonpayable",
-    type: "constructor",
   },
   {
-    inputs: [],
+    type: "function",
     name: "accountImplementation",
+    inputs: [],
     outputs: [
-      {
-        internalType: "contract SmartAccountV1",
-        name: "",
-        type: "address",
-      },
+      { name: "", type: "address", internalType: "contract SmartAccountV1" },
     ],
     stateMutability: "view",
-    type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "owner",
-        type: "address",
-      },
-      {
-        internalType: "uint256",
-        name: "salt",
-        type: "uint256",
-      },
-    ],
+    type: "function",
     name: "createAccount",
+    inputs: [
+      { name: "owner", type: "address", internalType: "address" },
+      { name: "salt", type: "uint256", internalType: "uint256" },
+    ],
     outputs: [
-      {
-        internalType: "contract SmartAccountV1",
-        name: "ret",
-        type: "address",
-      },
+      { name: "ret", type: "address", internalType: "contract SmartAccountV1" },
     ],
     stateMutability: "nonpayable",
-    type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "owner",
-        type: "address",
-      },
-      {
-        internalType: "uint256",
-        name: "salt",
-        type: "uint256",
-      },
-    ],
-    name: "getAddress",
-    outputs: [
-      {
-        internalType: "address",
-        name: "",
-        type: "address",
-      },
-    ],
-    stateMutability: "view",
     type: "function",
+    name: "getAddress",
+    inputs: [
+      { name: "owner", type: "address", internalType: "address" },
+      { name: "salt", type: "uint256", internalType: "uint256" },
+    ],
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
   },
 ] as const;
 
-export const SESSION_KEY_MANAGER_ABI = [
+export const AUTHORIZER_ABI = [
+  { type: "constructor", inputs: [], stateMutability: "nonpayable" },
   {
-    type: "constructor",
-    inputs: [
-      {
-        name: "factory_",
-        type: "address",
-        internalType: "contract SmartAccountV1Factory",
-      },
-      { name: "name", type: "string", internalType: "string" },
-    ],
-    stateMutability: "nonpayable",
+    type: "function",
+    name: "SIGNATURE_LENGTH",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
   },
   {
     type: "function",
-    name: "DOMAIN_SEPARATOR",
-    inputs: [],
-    outputs: [{ name: "", type: "bytes32", internalType: "bytes32" }],
-    stateMutability: "view",
+    name: "addAuthorizer",
+    inputs: [
+      { name: "newAuthorizer", type: "address", internalType: "address" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
   },
   {
     type: "function",
@@ -413,103 +372,79 @@ export const SESSION_KEY_MANAGER_ABI = [
   },
   {
     type: "function",
-    name: "factory",
+    name: "isAuthorizer",
+    inputs: [{ name: "authorizer", type: "address", internalType: "address" }],
+    outputs: [{ name: "valid", type: "bool", internalType: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "owner",
     inputs: [],
-    outputs: [
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "removeAuthorizer",
+    inputs: [{ name: "authorizer", type: "address", internalType: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "renounceOwnership",
+    inputs: [],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "transferOwnership",
+    inputs: [{ name: "newOwner", type: "address", internalType: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "validateAuthorization",
+    inputs: [
+      { name: "owner", type: "address", internalType: "address" },
+      { name: "smartAccount", type: "address", internalType: "address" },
+      { name: "hash", type: "bytes32", internalType: "bytes32" },
+      { name: "signature", type: "bytes", internalType: "bytes" },
+    ],
+    outputs: [{ name: "isAuthorized", type: "bool", internalType: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "event",
+    name: "AddAuthorizer",
+    inputs: [
       {
-        name: "",
+        name: "authorizer",
         type: "address",
-        internalType: "contract SmartAccountV1Factory",
+        indexed: true,
+        internalType: "address",
       },
     ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "isAuthorized",
-    inputs: [
-      { name: "smartAccount", type: "address", internalType: "address" },
-      { name: "sessionKey", type: "address", internalType: "address" },
-    ],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "nonces",
-    inputs: [{ name: "owner", type: "address", internalType: "address" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "permit",
-    inputs: [
-      { name: "owner", type: "address", internalType: "address" },
-      { name: "salt", type: "uint256", internalType: "uint256" },
-      { name: "sessionKey", type: "address", internalType: "address" },
-      { name: "r", type: "bytes32", internalType: "bytes32" },
-      { name: "s", type: "bytes32", internalType: "bytes32" },
-      { name: "v", type: "uint8", internalType: "uint8" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "revoke",
-    inputs: [
-      { name: "owner", type: "address", internalType: "address" },
-      { name: "salt", type: "uint256", internalType: "uint256" },
-      { name: "sessionKey", type: "address", internalType: "address" },
-      { name: "r", type: "bytes32", internalType: "bytes32" },
-      { name: "s", type: "bytes32", internalType: "bytes32" },
-      { name: "v", type: "uint8", internalType: "uint8" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "revokeAllSessionKeys",
-    inputs: [{ name: "salt", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "sessionKeysBy",
-    inputs: [
-      { name: "owner", type: "address", internalType: "address" },
-      { name: "salt", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [{ name: "", type: "address[]", internalType: "address[]" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "sessionKeysOf",
-    inputs: [
-      { name: "smartAccount", type: "address", internalType: "address" },
-    ],
-    outputs: [{ name: "", type: "address[]", internalType: "address[]" }],
-    stateMutability: "view",
+    anonymous: false,
   },
   { type: "event", name: "EIP712DomainChanged", inputs: [], anonymous: false },
   {
     type: "event",
-    name: "Permit",
+    name: "OwnershipTransferred",
     inputs: [
       {
-        name: "smartAccount",
+        name: "previousOwner",
         type: "address",
         indexed: true,
         internalType: "address",
       },
       {
-        name: "sessionKey",
+        name: "newOwner",
         type: "address",
-        indexed: false,
+        indexed: true,
         internalType: "address",
       },
     ],
@@ -517,18 +452,12 @@ export const SESSION_KEY_MANAGER_ABI = [
   },
   {
     type: "event",
-    name: "Revove",
+    name: "RemoveAuthorizer",
     inputs: [
       {
-        name: "smartAccount",
+        name: "authorizer",
         type: "address",
         indexed: true,
-        internalType: "address",
-      },
-      {
-        name: "sessionKey",
-        type: "address",
-        indexed: false,
         internalType: "address",
       },
     ],
@@ -545,22 +474,21 @@ export const SESSION_KEY_MANAGER_ABI = [
     name: "ECDSAInvalidSignatureS",
     inputs: [{ name: "s", type: "bytes32", internalType: "bytes32" }],
   },
-  {
-    type: "error",
-    name: "InvalidAccountNonce",
-    inputs: [
-      { name: "account", type: "address", internalType: "address" },
-      { name: "currentNonce", type: "uint256", internalType: "uint256" },
-    ],
-  },
   { type: "error", name: "InvalidShortString", inputs: [] },
   {
     type: "error",
-    name: "InvalidSigner",
-    inputs: [
-      { name: "signer", type: "address", internalType: "address" },
-      { name: "owner", type: "address", internalType: "address" },
-    ],
+    name: "InvalidSignatureLength",
+    inputs: [{ name: "length", type: "uint256", internalType: "uint256" }],
+  },
+  {
+    type: "error",
+    name: "OwnableInvalidOwner",
+    inputs: [{ name: "owner", type: "address", internalType: "address" }],
+  },
+  {
+    type: "error",
+    name: "OwnableUnauthorizedAccount",
+    inputs: [{ name: "account", type: "address", internalType: "address" }],
   },
   {
     type: "error",
