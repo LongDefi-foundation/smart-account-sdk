@@ -1,8 +1,9 @@
+import type { TypedDataDefinition } from "viem";
 import type { DexName, SinglePathSwapInput } from "./dex";
 
 export type SmartAccountV1Addresses = {
+  authorizer: `0x${string}`;
   entrypoint: `0x${string}`;
-  sessionKeyManager: `0x${string}`;
   smartAccountFactoryV1: `0x${string}`;
 };
 
@@ -30,7 +31,7 @@ export type InitSmartAccountV1Input = {
 };
 
 export type CreateSwapRequestInput = {
-  orderId: number;
+  orderSeparatorId?: number; // default 0
   smartAccount?: `0x${string}`;
   dex: DexName;
   swapInput: SinglePathSwapInput;
@@ -42,4 +43,12 @@ export type CreateSwapRequestOutput = {
   smartAccount: `0x${string}`;
   userOpHash: `0x${string}`;
   request: UserOperation;
+};
+
+export type CreateSessionKeyRequestOutput = {
+  session: {
+    privateKey: `0x${string}`;
+    address: `0x${string}`;
+  };
+  request: TypedDataDefinition;
 };

@@ -9,6 +9,7 @@ export {
 } from "./types/dex";
 
 export {
+  type CreateSessionKeyRequestOutput,
   type CreateSwapRequestInput,
   type CreateSwapRequestOutput,
   type InitSmartAccountV1Input,
