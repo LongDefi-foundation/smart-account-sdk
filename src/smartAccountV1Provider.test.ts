@@ -45,6 +45,9 @@ const bundler = privateKeyToAccount(
 const account = privateKeyToAccount(generatePrivateKey());
 
 const smartAccountProvider = new SmartAccountV1Provider(testClient);
+if (!smartAccountProvider.dex) {
+  throw new Error("Can not find dex contracts");
+}
 
 const WETH_ADDRESS = smartAccountProvider.dex.weth;
 const TOKEN_ADDRESS = Bun.env.TEST_TOKEN_ADDRESS as `0x${string}`;
@@ -88,6 +91,9 @@ const sendTokenInToSmartAccount = async (
 };
 
 const createNewSmartAccount = async (owner: `0x${string}`, salt?: bigint) => {
+  if (!smartAccountProvider.factory) {
+    throw new Error("Can not find smartAccountV1Factory");
+  }
   const smartAccountSalt = salt || BigInt(Date.now());
   await testClient.writeContract({
     account,
@@ -376,6 +382,9 @@ describe.if(startedAnvil)("create swap request with session key", () => {
   test("execute properly", async () => {
     {
       // impersonate owner of authorizer to add bundler to authorizer list
+      if (!smartAccountProvider.authorizer) {
+        throw new Error("Can not find authorizer contract");
+      }
       const owner = await testClient.readContract({
         address: smartAccountProvider.authorizer,
         abi: AUTHORIZER_ABI,

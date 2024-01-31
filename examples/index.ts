@@ -23,7 +23,7 @@ const account = privateKeyToAccount(
 ); //anvil account 0
 
 const smartAccountProvider = new SmartAccountV1Provider(testClient);
-const WETH_ADDRESS = smartAccountProvider.dex.weth;
+const WETH_ADDRESS = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
 const TOKEN_ADDRESS = "0x11cB8EF24755bc347AAe8b9694f24d66FE94d6c2";
 
 const port = process.env.PORT || 8080;
@@ -66,7 +66,7 @@ async function generateOrder(req: Request): Promise<Response> {
       await testClient.writeContract({
         account,
         abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-        address: smartAccountProvider.factory,
+        address: smartAccountProvider.factory!,
         functionName: "createAccount",
         args: [account.address, smartAccountSalt],
       });
@@ -83,7 +83,6 @@ async function generateOrder(req: Request): Promise<Response> {
 
     const { smartAccount, userOpHash, request } =
       await smartAccountProvider.createSwapRequest({
-        orderId: 0,
         dex: "uniswapV3",
         swapInput: {
           tokenIn: WETH_ADDRESS,

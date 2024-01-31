@@ -1,16 +1,12 @@
 import { ec as EC } from "elliptic";
 import {
-  BaseError,
-  ContractFunctionRevertedError,
   encodeAbiParameters,
   encodeFunctionData,
   zeroAddress,
-  type Chain,
   type PublicClient,
-  type Transport,
   type TypedDataDefinition,
 } from "viem";
-import { publicKeyToAddress } from "viem/utils";
+import { decodeErrorResult, publicKeyToAddress } from "viem/utils";
 import {
   AUTHORIZER_ABI,
   ENTRYPOINT_ABI,
@@ -26,7 +22,6 @@ import {
   SMART_ACCOUNT_V1_CHAINS,
 } from "./addresses";
 import type { Dex } from "./types/dex";
-import type { ReturnInfo } from "./types/entrypoint";
 import type {
   CreateSessionKeyRequestOutput,
   CreateSwapRequestInput,
@@ -36,22 +31,24 @@ import type {
 
 export class SmartAccountV1Provider {
   readonly ecdsa = new EC("secp256k1");
-  publicClient: PublicClient<Transport, Chain>;
-  authorizer: `0x${string}`;
-  factory: `0x${string}`;
-  dex: Dex;
+  publicClient: PublicClient;
+  authorizer?: `0x${string}`;
+  factory?: `0x${string}`;
+  dex?: Dex;
 
   constructor(
-    publicClient: PublicClient<Transport, Chain>,
+    publicClient: PublicClient,
     authorizer?: `0x${string}`,
     factory?: `0x${string}`,
     dex?: Dex
   ) {
-    const dexChain = DEX_CHAINS[publicClient.chain.id];
-    const smartAccountChain = SMART_ACCOUNT_V1_CHAINS[publicClient.chain.id];
-
     this.publicClient = publicClient;
+
+    const dexChain = publicClient.chain && DEX_CHAINS[publicClient.chain.id];
     this.dex = dex || dexChain;
+
+    const smartAccountChain =
+      publicClient.chain && SMART_ACCOUNT_V1_CHAINS[publicClient.chain.id];
     this.authorizer =
       authorizer || (smartAccountChain && smartAccountChain.authorizer);
     this.factory =
@@ -74,6 +71,10 @@ export class SmartAccountV1Provider {
     smartAccount: `0x${string}`,
     sessionNonce: bigint
   ): Promise<CreateSessionKeyRequestOutput> {
+    if (!this.authorizer) {
+      throw new Error("Must provider authorizer contract");
+    }
+
     const sessionKeyPair = this.ecdsa.genKeyPair();
     const sessionAddress = publicKeyToAddress(
       `0x${sessionKeyPair.getPublic("hex")}`
@@ -152,6 +153,13 @@ export class SmartAccountV1Provider {
   async createSwapRequest(
     createSwapRequestInput: CreateSwapRequestInput
   ): Promise<CreateSwapRequestOutput> {
+    if (!this.dex) {
+      throw new Error("Must provide dex contracts");
+    }
+    if (!this.factory) {
+      throw new Error("Must provide smartAccountV1Factory contract");
+    }
+
     if (
       !createSwapRequestInput.smartAccount &&
       !createSwapRequestInput.initSmartAccountInput
@@ -171,8 +179,6 @@ export class SmartAccountV1Provider {
     let smartAccount = createSwapRequestInput.smartAccount;
     let initCode = "0x" as `0x${string}`;
 
-    const smartAccountFactory = this.factory;
-
     const initSmartAccountInput = createSwapRequestInput.initSmartAccountInput;
     if (initSmartAccountInput) {
       const { owner, salt } = initSmartAccountInput;
@@ -188,7 +194,7 @@ export class SmartAccountV1Provider {
         args: [owner, salt],
       });
 
-      initCode = (smartAccountFactory.toLowerCase() +
+      initCode = (this.factory.toLowerCase() +
         initCodeCallData.slice(2)) as `0x${string}`;
       smartAccount = address.toLowerCase() as `0x${string}`;
     }
@@ -406,64 +412,63 @@ export class SmartAccountV1Provider {
   async calculateVerificationGasLimitV1(
     userOp: UserOperation
   ): Promise<bigint> {
-    // if (initSmartAccount) {
-    //   return BigInt(300_000);
-    // } else {
-    //   return BigInt(60_000);
-    // }
-    try {
-      const maxGas = 30_000_000n;
-      const mockSignature =
-        "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
-      const authorizerSignature = mockSignature.slice(2);
-      const ownerSignature = mockSignature.slice(2);
-      const sessionSignature = mockSignature.slice(2);
-      const nonce = "".padEnd(64, "0");
-
-      // this function always reverts
-      await this.publicClient.simulateContract({
-        abi: ENTRYPOINT_ABI,
-        address: ENTRYPOINT_ADDRESS,
-        functionName: "simulateValidation",
-        args: [
-          {
-            ...userOp,
-            verificationGasLimit: maxGas,
-            signature: `0x${
-              authorizerSignature + ownerSignature + sessionSignature + nonce
-            }`,
-          },
-        ],
-      });
-
-      throw new Error("Can not estimate verification gas");
-    } catch (err) {
-      if (err instanceof BaseError) {
-        const revertError = err.walk(
-          (err) => err instanceof ContractFunctionRevertedError
-        );
-        if (revertError instanceof ContractFunctionRevertedError) {
-          if (
-            revertError.data &&
-            revertError.data.errorName === "ValidationResult"
-          ) {
-            // [ returnInfo, senderInfo, factoryInfo, paymasterInfo, aggregatorInfo ]
-            const validationResult = revertError.data;
-            // { preOpGas, prefund, sigFailed, validAfter, validUntil, paymasterContext }
-            const returnInfo = validationResult.args![0];
-            const { preOpGas } = returnInfo as ReturnInfo;
-            return preOpGas;
-          }
-
-          const revertReason = revertError.data
-            ? `${revertError.data.errorName}(${revertError.data.args})}`
-            : "";
-          throw new Error(`Can not estimate verification gas. ${revertReason}`);
-        }
-      }
-
-      throw new Error(`Can not estimate verification gas. ${err}`);
+    const maxGas = 30_000_000n;
+    const mockSignature =
+      "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
+    const authorizerSignature = mockSignature.slice(2);
+    const ownerSignature = mockSignature.slice(2);
+    const sessionSignature = mockSignature.slice(2);
+    const nonce = "".padEnd(64, "0");
+    const data = encodeFunctionData({
+      abi: ENTRYPOINT_ABI,
+      functionName: "simulateValidation",
+      args: [
+        {
+          ...userOp,
+          verificationGasLimit: maxGas,
+          signature: `0x${
+            authorizerSignature + ownerSignature + sessionSignature + nonce
+          }`,
+        },
+      ],
+    });
+    const rpcUrl = this.publicClient.transport.url;
+    if (!rpcUrl) {
+      throw new Error("RPC URL not found");
     }
+    const simulationRes = await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_call",
+        params: [
+          {
+            from: ENTRYPOINT_ADDRESS,
+            to: ENTRYPOINT_ADDRESS,
+            data,
+          },
+          "pending",
+        ],
+        id: 1,
+      }),
+    });
+    const encodedData = await simulationRes.json();
+    const result = decodeErrorResult({
+      abi: ENTRYPOINT_ABI,
+      data: encodedData.error.data,
+    });
+    if (result.errorName === "ValidationResult") {
+      const returnInfo = result.args[0];
+      const { preOpGas } = returnInfo;
+      return preOpGas;
+    }
+
+    throw new Error(
+      `Estimate verification gas: ${result.errorName}(${result.args})`
+    );
   }
 
   async calculateExecuteBatchGasLimit(
