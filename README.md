@@ -6,12 +6,20 @@
 npm install @long-defi/sdk viem
 ```
 
+## Supported Chains
+
+- Sepolia
+
 ## Usage
 
-### `SmartAccountV1Provider` instance:
+### Exampe
+
+- https://github.com/LongDefi-foundation/sdk-example
+
+### Create `SmartAccountV1Provider` instance:
 
 ```typescript
-import { SmartAccountV1Provider } from "@longdefi/smart-account-sdk";
+import { SmartAccountV1Provider } from "@long-defi/sdk";
 
 const smartAccountV1Provider = new SmartAccountV1Provider(publicClient);
 ```
@@ -19,72 +27,42 @@ const smartAccountV1Provider = new SmartAccountV1Provider(publicClient);
 ### Create Session Key
 
 ```typescript
-const { sessionKey, request } =
+/**
+ *  type CreateSessionKeyRequestOutput = {
+ *    session: {
+ *      privateKey: `0x${string}`;
+ *      address: `0x${string}`;
+ *    };
+ *    request: TypedDataDefinition;
+ *  }
+ */
+
+const data: CreateSessionKeyRequestOutput =
   await smartAccountProvider.createSessionKeyRequest(
-    account.address,
-    smartAccountSalt
+    smartAccount,
+    sessionNonce
   );
 
 // Signing with `useSignTypedData()` hook (https://wagmi.sh/react/api/hooks/useSignTypedData)
-const signature = await signTypedDataAsync(request);
+const signature = await signTypedDataAsync(data.request);
 ```
 
-### Create swap request with uninitialized wallet
+### Create swap request with session key
 
 ```typescript
-// Get smart account salt from server
-const smartAccountSalt = await getSmartAccountSaltFromServer(...args);
+// Prerequisite: Smart account already deployed
+const smartAccountSalt = BigInt(0);
+const smartAccount = await getSmartAccountAddress(owner.address, smartAccountSalt);
 
-const smartAccount = await smartAccountProvider.getSmartAccountAddress(
-  owner,
-  smartAccountSalt
+// 1. Create session key and sign session key request
+const sessionNonce: bigint = ...; // challenge from server
+const { session, request } = await smartAccountV1Provider.createSessionKeyRequest(
+  smartAccount,
+  sessionNonce
 );
-const initSmartAccountInput = {
-  owner,
-  salt: smartAccountSalt,
-};
-const singlePathSwapInput = {
-  tokenIn,
-  tokenOut,
-  fee: 3000,
-  deadline: BigInt(2 ** 255),
-  amountIn: BigInt(100),
-  amountOutMinimum: BigInt(0),
-  sqrtPriceLimitX96: BigInt(0), // optional, default is 0
-  recipient: smartAccount, // optional, default is smart account
-} as const;
+const ownerSignature = await owner.signTypedData(sessionRequest);
 
-// Get orderId from server, must be unique
-const orderId = await getOrderIdFromServer(...args);
-
-const { smartAccount, userOpHash, request } =
-  await smartAccountV1Provider.createSwapRequest({
-    dex: "uniswapV3",
-    swapInput: singlePathSwapInput,
-    gasless: true,
-    initSmartAccountInput,
-    orderId,
-  });
-
-// There are 2 ways to sign request
-// 1. Using `useSignMessage` hook of `wagmi`
-const signature = await signMessage(config, {
-  message: { raw: userOpHash },
-});
-// 2. Using sessionKey
-const signature = signMessageWithSessionKey(userOpHash);
-
-const userOperation = { ...request, signature };
-// Send `userOperation` to server
-```
-
-### Swap request with existed wallet
-
-```typescript
-const smartAccount = await smartAccountV1Provider.getSmartAccountAddress(
-  owner,
-  smartAccountSalt
-);
+// 2. Create swap request and sign with session key
 const singlePathSwapInput = {
   tokenIn,
   tokenOut,
@@ -92,32 +70,76 @@ const singlePathSwapInput = {
   deadline: BigInt(2 ** 255),
   amountIn: BigInt(20),
   amountOutMinimum: BigInt(0),
-  sqrtPriceLimitX96: BigInt(0),
 };
-const gasless = true;
+// using when creating multiple orders in one direction(buy/sell) within a single pool.
+const orderSeparatorId = 0;
 const { userOpHash, request } = await smartAccountV1Provider.createSwapRequest({
+  orderSeparatorId, // optional, default is 0
   smartAccount,
   dex: "uniswapV3",
   swapInput: singlePathSwapInput,
-  gasless,
+  gasless: true,
+});
+const sessionSignature = signMessage({
+  privateKey: session.privateKey,
+  message: { raw: message },
 });
 
-// There are 2 ways to sign request
-// 1. Using `useSignMessage` hook of `wagmi`
+// 3. Aggregate signatures
+const clientSignature = smartAccountV1Provider.aggregateClientSignatures(
+  ownerSignature,
+  sessionSignature,
+  sessionNonce
+);
+const userOperation = { ...request, signature: clientSignature };
+
+// ==========================================
+// ===== Send `userOperation` to server =====
+// ==========================================
+const serverSignature = await bundler.signMessage({
+  message: { raw: userOpHash },
+});
+const fullSignature = `0x${
+  serverSignature.slice(2) + clientSignatures.slice(2)
+}` as const;
+userOperation.signature = signafullSignatureture;
+```
+
+### Create swap request without session key
+
+```typescript
+const singlePathSwapInput = {
+  tokenIn,
+  tokenOut,
+  fee: 3000,
+  deadline: BigInt(2 ** 255),
+  amountIn: BigInt(100),
+  amountOutMinimum: BigInt(0),
+  recipient: smartAccount, // optional, default is smart account
+} as const;
+
+// using when creating multiple orders in one direction(buy/sell) within a single pool.
+const orderSeparatorId = 0;
+const { smartAccount, userOpHash, request } =
+  await smartAccountV1Provider.createSwapRequest({
+    orderSeparatorId, // optional, default is 0
+    smartAccount,
+    dex: "uniswapV3",
+    swapInput: singlePathSwapInput,
+    gasless: true,
+  });
+
 const signature = await signMessage(config, {
   message: { raw: userOpHash },
 });
-// 2. Using sessionKey
-const signature = signMessageWithSessionKey(userOpHash);
 
 const userOperation = { ...request, signature };
-// Send `userOperation` to server
 ```
 
 ### Price Utils
 
 ```typescript
-const publicClient = createPublicClient({ chain: mainnet, transport: http() });
+const publicClient = usePublicClient();
 
 // The order of tokens is not important
 const price = await convertSqrtX96toPrice(
@@ -132,7 +154,3 @@ const sqrtX96 = await convertPriceToSqrtX96(
   price
 );
 ```
-
-## Supported Chains
-
-- Mumbai
