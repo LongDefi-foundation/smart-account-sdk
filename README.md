@@ -71,10 +71,14 @@ const singlePathSwapInput = {
   amountIn: BigInt(20),
   amountOutMinimum: BigInt(0),
 };
-// using when creating multiple orders in one direction(buy/sell) within a single pool.
-const orderSeparatorId = 0;
+
+/**
+ * `orderSeparator` prevents nonce conflict.
+ * It is useful when creating multiple orders
+ * in one direction (buy/sell) within a single pool.
+ */
 const { userOpHash, request } = await smartAccountV1Provider.createSwapRequest({
-  orderSeparatorId, // optional, default is 0
+  orderSeparatorId: 0, // optional, default is 0
   smartAccount,
   dex: "uniswapV3",
   swapInput: singlePathSwapInput,
@@ -85,7 +89,7 @@ const sessionSignature = signMessage({
   message: { raw: message },
 });
 
-// 3. Aggregate signatures
+// 3. Aggregate signatures on client side
 const clientSignature = smartAccountV1Provider.aggregateClientSignatures(
   ownerSignature,
   sessionSignature,
@@ -102,7 +106,7 @@ const serverSignature = await bundler.signMessage({
 const fullSignature = `0x${
   serverSignature.slice(2) + clientSignatures.slice(2)
 }` as const;
-userOperation.signature = signafullSignatureture;
+userOperation.signature = fullSignature;
 ```
 
 ### Create swap request without session key
@@ -115,14 +119,10 @@ const singlePathSwapInput = {
   deadline: BigInt(2 ** 255),
   amountIn: BigInt(100),
   amountOutMinimum: BigInt(0),
-  recipient: smartAccount, // optional, default is smart account
 } as const;
 
-// using when creating multiple orders in one direction(buy/sell) within a single pool.
-const orderSeparatorId = 0;
 const { smartAccount, userOpHash, request } =
   await smartAccountV1Provider.createSwapRequest({
-    orderSeparatorId, // optional, default is 0
     smartAccount,
     dex: "uniswapV3",
     swapInput: singlePathSwapInput,
