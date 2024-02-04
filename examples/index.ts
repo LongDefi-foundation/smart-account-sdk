@@ -1,12 +1,6 @@
 import { SMART_ACCOUNT_V1_FACTORY_ABI } from "@/abi";
 import { SmartAccountV1Provider } from "@/index";
-import {
-  createTestClient,
-  http,
-  parseEther,
-  publicActions,
-  walletActions,
-} from "viem";
+import { createTestClient, http, publicActions, walletActions } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 
@@ -51,37 +45,31 @@ Bun.serve({
 
 async function generateOrder(req: Request): Promise<Response> {
   try {
-    const { initSmartAccount }: { initSmartAccount: boolean } =
+    const { enableSessionKey }: { enableSessionKey: boolean } =
       await req.json();
-
-    let initSmartAccountInput;
-    let smartAccountAddress;
-    const smartAccountSalt = BigInt(Date.now());
-    if (!initSmartAccount) {
-      await testClient.setBalance({
-        address: account.address,
-        value: parseEther("1"),
-      });
+    const smartAccountSalt = BigInt(999_999_999);
+    const smartAccount = await smartAccountProvider.getSmartAccountAddress(
+      account.address,
+      smartAccountSalt
+    );
+    const bytecode = await testClient.getBytecode({
+      address: smartAccount,
+    });
+    if (!bytecode || bytecode === "0x") {
+      if (!smartAccountProvider.factory) {
+        throw new Error("Smart Account Factory not set");
+      }
 
       await testClient.writeContract({
         account,
         abi: SMART_ACCOUNT_V1_FACTORY_ABI,
-        address: smartAccountProvider.factory!,
+        address: smartAccountProvider.factory,
         functionName: "createAccount",
         args: [account.address, smartAccountSalt],
       });
-      smartAccountAddress = await smartAccountProvider.getSmartAccountAddress(
-        account.address,
-        smartAccountSalt
-      );
-    } else {
-      initSmartAccountInput = {
-        salt: smartAccountSalt,
-        owner: account.address,
-      };
     }
 
-    const { smartAccount, userOpHash, request } =
+    const { userOpHash, request } =
       await smartAccountProvider.createSwapRequest({
         dex: "uniswapV3",
         swapInput: {
@@ -93,12 +81,34 @@ async function generateOrder(req: Request): Promise<Response> {
           amountOutMinimum: BigInt(0),
         },
         gasless: true,
-        smartAccount: smartAccountAddress,
-        initSmartAccountInput,
+        smartAccount,
       });
-    const signature = await account.signMessage({
-      message: { raw: userOpHash },
-    });
+    let signature: `0x${string}`;
+
+    if (enableSessionKey) {
+      const sessionNonce = BigInt(Date.now());
+      const { request, session } =
+        await smartAccountProvider.createSessionKeyRequest(
+          smartAccount,
+          sessionNonce
+        );
+      const ownerSignature = await account.signTypedData(request);
+      const sessionSignature = await privateKeyToAccount(
+        session.privateKey
+      ).signMessage({
+        message: { raw: userOpHash },
+      });
+      signature = smartAccountProvider.aggregateClientSignatures(
+        ownerSignature,
+        sessionSignature,
+        sessionNonce
+      );
+    } else {
+      signature = await account.signMessage({
+        message: { raw: userOpHash },
+      });
+    }
+
     const userOperation = { ...request, signature };
 
     return new Response(
